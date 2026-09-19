@@ -91,6 +91,9 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
+    // AGP 9 disables resValues by default too; the launcher label is generated from
+    // app.name via resValue(), so the feature has to be switched on explicitly.
+    resValues = true
   }
   lint {
     abortOnError = false

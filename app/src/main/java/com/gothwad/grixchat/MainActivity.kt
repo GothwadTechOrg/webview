@@ -73,8 +73,9 @@ class MainActivity : ComponentActivity() {
                 } else {
                     WebSettings.LOAD_CACHE_ELSE_NETWORK
                 }
-                swSettings.allowContentAccess = true
-                swSettings.allowFileAccess = true
+                // Remote-content app: service workers have no business reading file:// or content://
+                swSettings.allowContentAccess = false
+                swSettings.allowFileAccess = false
             } catch (e: Exception) {
                 android.util.Log.e("MainActivity", "Error configuring ServiceWorkerController on launch", e)
             }
@@ -87,24 +88,19 @@ class MainActivity : ComponentActivity() {
         val database = GrixDatabase.getDatabase(applicationContext)
         val repository = GrixRepository(database.grixDao())
 
-        // Fetch Real Firebase token asynchronously on launch
+        // Fetch the FCM registration token on launch — but ONLY if Firebase is really configured.
+        // Previously this block fabricated a placeholder FirebaseApp ("placeholder-api-key-to-allow-init")
+        // when google-services.json was absent, so token retrieval silently failed forever while the
+        // service, helper and JS bridge all looked wired up. Better to fail loudly.
+        // To enable push: add google-services.json and apply the com.google.gms.google-services plugin.
         try {
-            val hasFirebase = try {
-                if (com.google.firebase.FirebaseApp.getApps(applicationContext).isEmpty()) {
-                    val options = com.google.firebase.FirebaseOptions.Builder()
-                        .setApplicationId("1:1234567890:android:e1234567890abcdef") // Fallback placeholder
-                        .setApiKey("placeholder-api-key-to-allow-init")
-                        .setProjectId("grixchatlite-placeholder")
-                        .build()
-                    com.google.firebase.FirebaseApp.initializeApp(applicationContext, options)
-                }
-                true
-            } catch (initEx: Exception) {
-                android.util.Log.w("MainActivity", "Could not initialize Firebase dynamically: ${initEx.message}")
-                false
-            }
-
-            if (hasFirebase) {
+            if (com.google.firebase.FirebaseApp.getApps(applicationContext).isEmpty()) {
+                android.util.Log.w(
+                    "MainActivity",
+                    "Firebase is not configured (no google-services.json / google-services plugin). " +
+                        "Push notifications are DISABLED."
+                )
+            } else {
                 com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
                     if (task.isSuccessful) {
                         val token = task.result
@@ -151,6 +147,9 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
+    // Passed into the AndroidView factory as a plain callback (state writes stay out of the factory)
+    val onWebViewReady: (WebView) -> Unit = { webViewInstance = it }
+
     var customFilePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
 
     val fileChooserLauncher = rememberLauncherForActivityResult(
@@ -185,10 +184,38 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
         }
     }
 
-    // Request setup for all essential device permissions on startup (Notifications, Camera, Microphone, Location, Contacts) except storage/photos to prevent annoying popup
+    // Ask only for what the app actually uses: notifications always, camera/mic lazily
+    // (WebView/WebRTC only triggers them when the page needs them).
+    // Contacts, phone state and CALL_PHONE were requested here but never used anywhere in the
+    // codebase — those are Play Store "sensitive permission without core functionality" rejects.
+    // A WebView permission request that is waiting for the OS runtime permission dialog.
+    // Granting it inside onPermissionRequest alone does nothing: the app-level permission
+    // must be granted first, so the request is parked here until the user answers.
+    var pendingWebPermissionRequest by remember { mutableStateOf<PermissionRequest?>(null) }
+    var pendingGeoCallback by remember { mutableStateOf<GeolocationPermissions.Callback?>(null) }
+    var pendingGeoOrigin by remember { mutableStateOf<String?>(null) }
+
     val permissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
+        val allGranted = results.isNotEmpty() && results.values.all { it }
+
+        pendingWebPermissionRequest?.let { request ->
+            pendingWebPermissionRequest = null
+            try {
+                if (allGranted) request.grant(request.resources ?: emptyArray()) else request.deny()
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Completing deferred WebView permission failed", e)
+            }
+        }
+
+        pendingGeoCallback?.let { callback ->
+            val origin = pendingGeoOrigin
+            pendingGeoCallback = null
+            pendingGeoOrigin = null
+            callback.invoke(origin, allGranted, false)
+        }
+
         val deniedPermissions = results.filter { !it.value }.keys
         if (deniedPermissions.isNotEmpty()) {
             android.util.Log.d("MainActivity", "User denied some permissions: $deniedPermissions")
@@ -196,16 +223,7 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
     }
 
     LaunchedEffect(Unit) {
-        val list = mutableListOf(
-            Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.READ_CONTACTS,
-            Manifest.permission.WRITE_CONTACTS,
-            Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.CALL_PHONE
-        )
+        val list = mutableListOf<String>()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             list.add(Manifest.permission.POST_NOTIFICATIONS)
@@ -240,10 +258,13 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
                     .fillMaxWidth()
                     .weight(1f)
             ) {
-                if (!isError) {
-                    // Full-screen WebView sitting precisely in the safe frame
-                    AndroidView(
-                        factory = { ctx ->
+                // The WebView stays mounted for the whole screen lifetime. It used to be inside
+                // `if (!isError)`, so an error tore it out of composition and Retry reloaded an
+                // already-detached instance — which did nothing while a brand new WebView was
+                // created on top of it. The error panel is now an overlay instead.
+                // Full-screen WebView sitting precisely in the safe frame
+                AndroidView(
+                    factory = { ctx ->
                             WebView(ctx).apply {
                                 layoutParams = ViewGroup.LayoutParams(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -263,8 +284,10 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
                                 settings.apply {
                                     javaScriptEnabled = true
                                     domStorageEnabled = true
-                                    allowFileAccess = true
-                                    allowContentAccess = true
+                                    // Remote-content WebView loading a third-party page: file:// and
+                                    // content:// access turn any XSS into a local file read. Keep off.
+                                    allowFileAccess = false
+                                    allowContentAccess = false
                                     setGeolocationEnabled(true) // Enable Web Geolocation support
                                     loadsImagesAutomatically = true
                                     useWideViewPort = true
@@ -423,11 +446,50 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
                                     }
 
                                     override fun onPermissionRequest(request: PermissionRequest?) {
-                                        // Grant requested camera/audio/etc permission requests inside the WebView
-                                        try {
-                                            request?.grant(request?.resources ?: emptyArray())
-                                        } catch (e: Exception) {
-                                            android.util.Log.e("MainActivity", "WebRTC grant permission error", e)
+                                        // Two rules here:
+                                        //  1. Only OUR OWN origin may use the camera/mic. Previously every
+                                        //     origin was granted unconditionally, so any third-party page
+                                        //     (OAuth redirect, shared link) got instant access with no prompt.
+                                        //  2. Granting the WebView request does NOT grant the Android runtime
+                                        //     permission — the OS dialog has to run first, otherwise the page
+                                        //     silently fails. So ask for it and finish the grant in the callback.
+                                        val req = request ?: return
+                                        val origin = req.origin?.toString().orEmpty()
+
+                                        if (!viewModel.isTrustedOrigin(origin)) {
+                                            android.util.Log.w("MainActivity", "Denied camera/mic for untrusted origin: $origin")
+                                            try {
+                                                req.deny()
+                                            } catch (e: Exception) {
+                                                android.util.Log.e("MainActivity", "WebRTC deny error", e)
+                                            }
+                                            return
+                                        }
+
+                                        val resources = req.resources?.toList().orEmpty()
+                                        val needed = buildList {
+                                            if (resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) {
+                                                add(Manifest.permission.CAMERA)
+                                            }
+                                            if (resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) {
+                                                add(Manifest.permission.RECORD_AUDIO)
+                                            }
+                                        }
+                                        val missing = needed.filter {
+                                            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+                                        }
+
+                                        if (missing.isEmpty()) {
+                                            try {
+                                                req.grant(req.resources ?: emptyArray())
+                                            } catch (e: Exception) {
+                                                android.util.Log.e("MainActivity", "WebRTC grant permission error", e)
+                                            }
+                                        } else {
+                                            // Drop any stale request so it cannot be granted by mistake
+                                            pendingWebPermissionRequest?.let { runCatching { it.deny() } }
+                                            pendingWebPermissionRequest = req
+                                            permissionsLauncher.launch(missing.toTypedArray())
                                         }
                                     }
 
@@ -435,8 +497,29 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
                                         origin: String?,
                                         callback: GeolocationPermissions.Callback?
                                     ) {
-                                        // Auto-approve the WebView-level request since OS-level permissions protect the user
-                                        callback?.invoke(origin, true, false)
+                                        // Same rule as camera/mic: never auto-approve an arbitrary origin,
+                                        // and make sure the OS location permission is actually held before
+                                        // telling the page that geolocation is available.
+                                        val cb = callback ?: return
+                                        if (!viewModel.isTrustedOrigin(origin.orEmpty())) {
+                                            cb.invoke(origin, false, false)
+                                            return
+                                        }
+
+                                        val missing = listOf(
+                                            Manifest.permission.ACCESS_FINE_LOCATION,
+                                            Manifest.permission.ACCESS_COARSE_LOCATION
+                                        ).filter {
+                                            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+                                        }
+
+                                        if (missing.isEmpty()) {
+                                            cb.invoke(origin, true, false)
+                                        } else {
+                                            pendingGeoCallback = cb
+                                            pendingGeoOrigin = origin
+                                            permissionsLauncher.launch(missing.toTypedArray())
+                                        }
                                     }
 
                                      override fun onShowFileChooser(
@@ -472,7 +555,10 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
                                 )
 
                                 loadUrl(viewModel.targetUrl)
-                                webViewInstance = this
+
+                                // Mirror the live instance into Compose state for BackHandler,
+                                // without writing state from inside the factory lambda.
+                                post { onWebViewReady(this) }
                             }
                         },
                         update = { webView ->
@@ -525,9 +611,25 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
                             .testTag("grix_webview_panel")
                     )
 
+                    // Tear the WebView down when this screen really goes away.
+                    // Nothing destroyed it before, so the WebView (and the Activity behind it)
+                    // was retained for the whole process lifetime.
+                    DisposableEffect(Unit) {
+                        onDispose {
+                            webViewInstance?.let { stale ->
+                                stale.stopLoading()
+                                stale.webChromeClient = null
+                                stale.webViewClient = WebViewClient()
+                                stale.removeJavascriptInterface("GrixApp")
+                                stale.destroy()
+                            }
+                            webViewInstance = null
+                        }
+                    }
+
                     // Elegantly fade-out loading spinner overlay on page transitions
                     androidx.compose.animation.AnimatedVisibility(
-                        visible = progress < 100,
+                        visible = progress < 100 && !isError,
                         enter = fadeIn(animationSpec = tween(200)),
                         exit = fadeOut(animationSpec = tween(400))
                     ) {
@@ -546,7 +648,10 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
                             )
                         }
                     }
-                } else {
+
+                // Error panel overlays the still-mounted WebView, so Retry can talk to a
+                // live instance and the page state survives a temporary network drop.
+                if (isError) {
                     // Elegant offline recovery screen - minimalist theme matching
                     Box(
                         modifier = Modifier

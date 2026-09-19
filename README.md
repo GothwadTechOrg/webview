@@ -114,6 +114,28 @@ GrixChat/
 
 ---
 
+## 🔔 Push Notifications (FCM) — setup required
+
+The app ships with FCM code, but **push notifications stay disabled until Firebase is wired up**.
+Both of these are required:
+
+1. Add your `google-services.json` to the `app/` directory.
+2. Apply the Google Services plugin — uncomment in `app/build.gradle.kts`:
+   ```kotlin
+   plugins {
+     // ...
+     alias(libs.plugins.google.services)
+   }
+   ```
+
+Without them, `FirebaseApp.getApps()` is empty, the app logs
+`Firebase is not configured ... Push notifications are DISABLED.`, and
+`window.GrixApp.getPushToken()` returns a locally generated placeholder token.
+(Previously the app silently initialised Firebase with a fake API key, so token
+retrieval failed forever while every piece of the notification stack *looked* connected.)
+
+---
+
 ## 🔐 CI/CD & Signing Secrets
 
 The repository includes pre-configured GitHub Actions workflows for continuous integration and automated release deployments.

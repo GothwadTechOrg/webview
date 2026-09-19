@@ -32,6 +32,11 @@ class GrixViewModel(
     // Target web resource loaded dynamically from environment configuration
     val targetUrl = com.gothwad.grixchat.BuildConfig.TARGET_URL
 
+    // Only this host (plus its subdomains) may use camera, microphone and geolocation.
+    val trustedHost: String = runCatching {
+        java.net.URI(targetUrl).host.orEmpty()
+    }.getOrDefault("")
+
     // Backing flows for states
     private val _isOnline = MutableStateFlow(true)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
@@ -115,6 +120,21 @@ class GrixViewModel(
 
     fun setWebViewError(hasError: Boolean) {
         _isWebViewError.value = hasError
+    }
+
+    /**
+     * True when [origin] belongs to the app's own web app. Used to gate WebView-level
+     * permission grants so a third-party page can never silently get the camera or mic.
+     */
+    fun isTrustedOrigin(origin: String): Boolean {
+        if (origin.isBlank() || trustedHost.isBlank()) return false
+        val host = runCatching {
+            val uri = if (origin.contains("://")) java.net.URI(origin) else java.net.URI("https://$origin")
+            uri.host.orEmpty()
+        }.getOrNull() ?: return false
+
+        return host.equals(trustedHost, ignoreCase = true) ||
+            host.endsWith(".$trustedHost", ignoreCase = true)
     }
 
     fun setDarkThemeOverride(isDark: Boolean?) {

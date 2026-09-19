@@ -14,8 +14,11 @@ android {
     applicationId = "com.gothwad.grixchat"
     minSdk = 23
     targetSdk = 35
-    versionCode = 1
-    versionName = "1.0.0"
+    // CI passes -PversionCode / -PversionName (see .github/workflows/build.yml).
+    // Without reading them here every release shipped as 1.0.0 / code 1, which
+    // makes a second Play Store upload impossible. Falls back to local defaults.
+    versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
+    versionName = (project.findProperty("versionName") as String?)?.takeIf { it.isNotBlank() } ?: "1.0.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

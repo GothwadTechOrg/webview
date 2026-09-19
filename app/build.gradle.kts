@@ -6,18 +6,49 @@ plugins {
   alias(libs.plugins.secrets)
 }
 
+// ---------------------------------------------------------------------------
+// Template configuration — every app.* value comes from gradle.properties, so a
+// new app is rebranded from that one block instead of hunting strings in code.
+// TARGET_URL comes from .env via the secrets plugin (see .env.example).
+// ---------------------------------------------------------------------------
+fun templateProp(name: String, fallback: String): String =
+  (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() } ?: fallback
+
+val appName = templateProp("app.name", "GrixChat")
+val appId = templateProp("app.id", "com.gothwad.grixchat")
+val appVersionCode = templateProp("app.versionCode", "1").toIntOrNull() ?: 1
+val appVersionName = templateProp("app.versionName", "1.0.0")
+val jsBridgeName = templateProp("app.jsBridgeName", "GrixApp")
+val notificationChannelId = templateProp("app.notificationChannelId", "grix_chat_notifications")
+val notificationChannelName = templateProp("app.notificationChannelName", "App Notifications")
+val notificationChannelDescription =
+  templateProp("app.notificationChannelDescription", "Messages and updates from the app")
+val prefsName = templateProp("app.prefsName", "app_prefs")
+
 android {
   namespace = "com.gothwad.grixchat"
   compileSdk = 35
 
   defaultConfig {
-    applicationId = "com.gothwad.grixchat"
+    applicationId = appId
     minSdk = 23
     targetSdk = 35
-    versionCode = 1
-    versionName = "1.0.0"
+    // CI passes -PversionCode / -PversionName; those win over gradle.properties.
+    // Without reading them here every release shipped as 1.0.0 / code 1, which
+    // makes a second Play Store upload impossible.
+    versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: appVersionCode
+    versionName = (project.findProperty("versionName") as String?)?.takeIf { it.isNotBlank() } ?: appVersionName
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // Kitchen sink of the template config, exposed to Kotlin as BuildConfig.*
+    resValue("string", "app_name", appName)
+    buildConfigField("String", "APP_NAME", "\"$appName\"")
+    buildConfigField("String", "JS_BRIDGE_NAME", "\"$jsBridgeName\"")
+    buildConfigField("String", "NOTIFICATION_CHANNEL_ID", "\"$notificationChannelId\"")
+    buildConfigField("String", "NOTIFICATION_CHANNEL_NAME", "\"$notificationChannelName\"")
+    buildConfigField("String", "NOTIFICATION_CHANNEL_DESCRIPTION", "\"$notificationChannelDescription\"")
+    buildConfigField("String", "PREFS_NAME", "\"$prefsName\"")
   }
 
   signingConfigs {

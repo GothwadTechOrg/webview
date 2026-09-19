@@ -9,23 +9,19 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.READ_CONTACTS" />
-    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
-    
-    <!-- Phone, Call, and Audio/Video system state permissions -->
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- Audio routing for WebRTC calls; VIBRATE/WAKE_LOCK back the notification channel and FCM -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- Files, Storage, and Media permissions (Adaptive for both legacy and Android 13+) -->
+    <!-- Downloads on legacy devices only. Android 13+ media access goes through the system
+         picker (SAF), so READ_MEDIA_* was declared but never needed. -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
+    <!-- Removed: READ_CONTACTS, WRITE_CONTACTS, READ_PHONE_STATE, CALL_PHONE and
+         RECEIVE_BOOT_COMPLETED were declared and requested at startup but no code path
+         ever used them. Play flags unused sensitive permissions at review time. -->
 
     <!-- Camera, Audio, and WebRTC hardware capabilities -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />

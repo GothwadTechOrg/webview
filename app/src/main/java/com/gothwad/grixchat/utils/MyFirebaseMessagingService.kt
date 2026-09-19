@@ -1,6 +1,7 @@
 package com.gothwad.grixchat.utils
 
 import android.util.Log
+import com.gothwad.grixchat.BuildConfig
 import com.gothwad.grixchat.data.GrixDatabase
 import com.gothwad.grixchat.data.GrixRepository
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -23,8 +24,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         super.onNewToken(token)
         Log.d(tag, "Refreshed FCM Token: $token")
         
-        // Save the token locally so Javascript can fetch it via window.GrixApp.getPushToken()
-        val sharedPrefs = getSharedPreferences("grix_prefs", MODE_PRIVATE)
+        // Save the token locally so Javascript can fetch it via window.<app.jsBridgeName>.getPushToken()
+        val sharedPrefs = getSharedPreferences(BuildConfig.PREFS_NAME, MODE_PRIVATE)
         sharedPrefs.edit().putString("fcm_token", token).apply()
     }
 
@@ -50,7 +51,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             }
         }
 
-        val finalTitle = title ?: "GrixChat Message"
+        val finalTitle = title ?: "${BuildConfig.APP_NAME} Message"
         val finalBody = body ?: "You have received a new message."
 
         Log.d(tag, "Displaying notification: Title=$finalTitle, Body=$finalBody")

@@ -14,9 +14,11 @@ import androidx.core.app.NotificationManagerCompat
 import com.gothwad.grixchat.MainActivity
 
 object GrixNotificationHelper {
-    private const val CHANNEL_ID = "grix_chat_notifications"
-    private const val CHANNEL_NAME = "GrixChat Notifications"
-    private const val CHANNEL_DESC = "Received chat messages and updates from GrixChat"
+    // Values come from gradle.properties (app.notificationChannel*) via BuildConfig,
+    // so a rebrand does not have to touch this file.
+    private val CHANNEL_ID = com.gothwad.grixchat.BuildConfig.NOTIFICATION_CHANNEL_ID
+    private val CHANNEL_NAME = com.gothwad.grixchat.BuildConfig.NOTIFICATION_CHANNEL_NAME
+    private val CHANNEL_DESC = com.gothwad.grixchat.BuildConfig.NOTIFICATION_CHANNEL_DESCRIPTION
     private const val NOTIFICATION_ID = 1001
 
     fun createNotificationChannel(context: Context) {

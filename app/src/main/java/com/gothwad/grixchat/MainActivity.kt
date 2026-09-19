@@ -105,7 +105,7 @@ class MainActivity : ComponentActivity() {
                     if (task.isSuccessful) {
                         val token = task.result
                         android.util.Log.d("MainActivity", "Successfully retrieved initial FCM token: $token")
-                        val sharedPrefs = getSharedPreferences("grix_prefs", android.content.Context.MODE_PRIVATE)
+                        val sharedPrefs = getSharedPreferences(BuildConfig.PREFS_NAME, android.content.Context.MODE_PRIVATE)
                         sharedPrefs.edit().putString("fcm_token", token).apply()
                     } else {
                         android.util.Log.w("MainActivity", "Fetching FCM registration token failed", task.exception)
@@ -146,6 +146,9 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
     val progress by viewModel.loadProgress.collectAsStateWithLifecycle()
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+
+    // Names the web app and the container share; both are template configuration.
+    val jsBridgeName = BuildConfig.JS_BRIDGE_NAME
 
     // Passed into the AndroidView factory as a plain callback (state writes stay out of the factory)
     val onWebViewReady: (WebView) -> Unit = { webViewInstance = it }
@@ -392,8 +395,8 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
                                                         } catch(e) {}
                                                     }
                                                     
-                                                    if (window.GrixApp && window.GrixApp.setTheme) {
-                                                        window.GrixApp.setTheme(isDark);
+                                                    if (window.${jsBridgeName} && window.${jsBridgeName}.setTheme) {
+                                                        window.${jsBridgeName}.setTheme(isDark);
                                                     }
                                                 }
                                                 
@@ -548,10 +551,12 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
                                     }
                                 }
 
-                                // Inject JS push notification / token channel to match website capabilities
+                                // Inject JS push notification / token channel to match website capabilities.
+                                // The bridge name is configurable (app.jsBridgeName) so the web app and
+                                // the container cannot drift apart.
                                 addJavascriptInterface(
                                     GrixJavascriptInterface(ctx, viewModel),
-                                    "GrixApp"
+                                    BuildConfig.JS_BRIDGE_NAME
                                 )
 
                                 loadUrl(viewModel.targetUrl)
@@ -620,7 +625,7 @@ fun GrixChatScreen(viewModel: GrixViewModel, isDarkTheme: Boolean) {
                                 stale.stopLoading()
                                 stale.webChromeClient = null
                                 stale.webViewClient = WebViewClient()
-                                stale.removeJavascriptInterface("GrixApp")
+                                stale.removeJavascriptInterface(BuildConfig.JS_BRIDGE_NAME)
                                 stale.destroy()
                             }
                             webViewInstance = null

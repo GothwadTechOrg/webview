@@ -13,9 +13,12 @@ import org.robolectric.annotation.Config
 class ExampleRobolectricTest {
 
   @Test
-  fun `read string from context`() {
+  fun `launcher label matches the template configuration`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
-    assertEquals("GrixChat", appName)
+    // app_name is generated from app.name in gradle.properties, so assert against the
+    // configured value instead of a literal: this test keeps working after a rebrand and
+    // fails if the config stops reaching the packaged resources.
+    assertEquals(BuildConfig.APP_NAME, appName)
   }
 }
